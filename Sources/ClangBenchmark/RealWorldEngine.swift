@@ -230,6 +230,12 @@ class RealWorldEngine: ObservableObject {
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
         let cached = cacheDir.appendingPathComponent(filename)
         if FileManager.default.fileExists(atPath: cached.path) { return (0, cached) }
+        // Try bundled resource first (offline fallback)
+        if let bundled = Bundle.main.url(forResource: filename.replacingOccurrences(of: ".tar.gz", with: ""), withExtension: "tar.gz", subdirectory: "Resources") {
+            try? FileManager.default.copyItem(at: bundled, to: cached)
+            if FileManager.default.fileExists(atPath: cached.path) { return (0, cached) }
+        }
+        // Network download with timeout
         let start = CFAbsoluteTimeGetCurrent()
         run("curl", "-sL", "--connect-timeout", "15", "--max-time", "120", "-o", cached.path, url, timeout: 130)
         return ((CFAbsoluteTimeGetCurrent()-start)*1000, cached)
