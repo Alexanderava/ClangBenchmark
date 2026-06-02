@@ -15,9 +15,20 @@ struct LeaderboardView: View {
                     // Header
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(L10n.v("leaderboard_title"))
-                                .font(.system(size: 26, weight: .bold, design: .rounded))
-                                .foregroundColor(.black.opacity(0.75))
+                            HStack(spacing: 8) {
+                                Text(L10n.v("leaderboard_title"))
+                                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                                    .foregroundColor(.black.opacity(0.75))
+                                // Refresh button
+                                Button(action: { withAnimation { api.fetchLeaderboard() } }) {
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 14, weight: .medium))
+                                        .foregroundColor(.black.opacity(0.4))
+                                }
+                                .buttonStyle(.plain)
+                                .scaleEffect(api.isLoading ? 0.8 : 1)
+                                .animation(api.isLoading ? Animation.easeInOut(duration: 0.3).repeatForever(autoreverses: true) : .default, value: api.isLoading)
+                            }
                             Text(L10n.v("app_subtitle"))
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(.black.opacity(0.4))
@@ -133,11 +144,11 @@ struct LeaderboardView: View {
         VStack(spacing: 10) {
             // Header
             HStack(spacing: 0) {
-                Text(L10n.v("leaderboard_rank")).frame(width: 44, alignment: .leading)
+                Text(L10n.v("leaderboard_rank")).frame(width: 40, alignment: .leading)
                 Text("CPU").frame(maxWidth: .infinity, alignment: .leading)
-                Text("CORES").frame(width: 50, alignment: .center)
-                Text("SCORE").frame(width: 60, alignment: .trailing)
-                Text("SPEED").frame(width: 70, alignment: .trailing)
+                Text("CORES").frame(width: 48, alignment: .center)
+                Text("SCORE").frame(width: 66, alignment: .trailing)
+                Text("SPEED").frame(width: 68, alignment: .trailing)
             }
             .font(.system(size: 10, weight: .bold))
             .foregroundColor(.black.opacity(0.25))
@@ -187,21 +198,21 @@ struct LeaderboardRow: View {
 
             // CORES
             Text("\(entry.cpuCores)+\(entry.gpuCores)")
-                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .font(.system(size: 11, weight: .medium, design: .rounded))
                 .foregroundColor(.purple.opacity(0.7))
-                .frame(width: 50, alignment: .center)
+                .frame(width: 48, alignment: .center)
 
             // SCORE
-            Text(String(format: "%.0f", entry.score))
-                .font(.system(size: 14, weight: .bold, design: .rounded))
+            Text(entry.score >= 10000 ? String(format: "%.0fK", entry.score / 1000) : String(format: "%.0f", entry.score))
+                .font(.system(size: 13, weight: .bold, design: .rounded))
                 .foregroundColor(.black.opacity(0.7))
-                .frame(width: 60, alignment: .trailing)
+                .frame(width: 66, alignment: .trailing)
 
             // SPEED
             Text(String(format: "%.1f", entry.klinesPerSec))
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundColor(.black.opacity(0.4))
-                .frame(width: 70, alignment: .trailing)
+                .frame(width: 68, alignment: .trailing)
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(RoundedRectangle(cornerRadius: 10)

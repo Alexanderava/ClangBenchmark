@@ -37,7 +37,8 @@ class LeaderboardAPI: ObservableObject {
 
     func fetchLeaderboard() {
         isLoading = true
-        let url = URL(string: readURL)!
+        // Cache-bust with timestamp to bypass GitHub CDN cache
+        let url = URL(string: readURL + "?t=\(Int(Date().timeIntervalSince1970))")!
         URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
             DispatchQueue.main.async {
                 self?.isLoading = false
