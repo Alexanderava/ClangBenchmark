@@ -3,6 +3,8 @@ set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="ClangBenchmark"
+# GitHub PAT for leaderboard submissions (not committed to git)
+GH_TOKEN="${CLANGBENCH_GH_TOKEN:-}"
 BUILD_DIR="$PROJECT_DIR/.build"
 APP_BUNDLE="$PROJECT_DIR/$APP_NAME.app"
 CONTENTS="$APP_BUNDLE/Contents"
@@ -111,3 +113,11 @@ echo ""
 # Step 8: Launch the app
 open "$APP_BUNDLE"
 echo "▶️  Launching..."
+
+# Inject GitHub token for leaderboard (not committed to source)
+if [ -n "$GH_TOKEN" ]; then
+    defaults write ClangBenchmark github_pat "$GH_TOKEN" 2>/dev/null || true
+    echo "🔑 Leaderboard token configured"
+else
+    echo "⚠️  No GH_TOKEN env — leaderboard submit disabled"
+fi
