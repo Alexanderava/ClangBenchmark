@@ -34,7 +34,12 @@ class LeaderboardAPI: ObservableObject {
     }()
 
     private var bundledSeedURL: URL? {
-        Bundle.main.url(forResource: "leaderboard_seed", withExtension: "json", subdirectory: "Resources")
+        // In packaged .app, resources are under Resources/
+        if let url = Bundle.main.url(forResource: "leaderboard_seed", withExtension: "json", subdirectory: "Resources") {
+            return url
+        }
+        // In SPM dev builds, resources are at module root
+        return Bundle.module.url(forResource: "leaderboard_seed", withExtension: "json")
     }
 
     // MARK: - Fetch

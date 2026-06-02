@@ -171,8 +171,7 @@ struct ResultView: View {
     }
 
     var klinesPerSec: Double {
-        guard totalCompileMs > 0 else { return 0 }
-        return Double(totalLines) / (totalCompileMs)
+        macroEngine.bestKlinesPerSec
     }
 
     var totalScore: Double { klinesPerSec * 203.04 }

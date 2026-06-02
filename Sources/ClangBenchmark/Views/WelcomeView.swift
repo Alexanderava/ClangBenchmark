@@ -123,11 +123,13 @@ struct WelcomeView: View {
 
     var cpuShortName: String {
         let name = engine.cpuName
-        if name.contains("M2") { return "M2 Max" }
-        if name.contains("M3") { return "M3" }
-        if name.contains("M1") { return "M1" }
-        if name.contains("M4") { return "M4" }
-        return name.components(separatedBy: "@").first?.trimmingCharacters(in: .whitespaces) ?? name
+        // Strip frequency suffix like "@ 3.50GHz"
+        let short = name.components(separatedBy: "@").first?.trimmingCharacters(in: .whitespaces) ?? name
+        // For Apple Silicon, keep the full name (e.g. "Apple M5 Pro")
+        if short.contains("Apple") { return short }
+        // For Intel/AMD, shorten common patterns
+        if let range = short.range(of: "CPU ") { return String(short[range.upperBound...]) }
+        return short
     }
 }
 

@@ -22,16 +22,21 @@ class BenchmarkEngine: ObservableObject {
         clangTask.arguments = ["--version"]
         let clangPipe = Pipe()
         clangTask.standardOutput = clangPipe
+        clangTask.standardError = clangPipe
+        // Use async read to prevent pipe deadlock
+        var clangData = Data()
+        clangPipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; if d.isEmpty { return }; clangData.append(d)
+        }
         try? clangTask.run()
         clangTask.waitUntilExit()
-        if let data = try? clangPipe.fileHandleForReading.readToEnd() {
-            let full = String(data: data, encoding: .utf8) ?? ""
-            clangVersion = full.components(separatedBy: "\n").first ?? "Unknown"
-            if let match = try? NSRegularExpression(pattern: "clang-(\\d+\\.\\d+)").firstMatch(in: full, range: NSRange(full.startIndex..., in: full)) {
-                clangShortVersion = "Clang " + String(full[Range(match.range(at: 1), in: full)!])
-            } else {
-                clangShortVersion = "Apple Clang"
-            }
+        clangPipe.fileHandleForReading.readabilityHandler = nil
+        let full = String(data: clangData, encoding: .utf8) ?? ""
+        clangVersion = full.components(separatedBy: "\n").first ?? "Unknown"
+        if let match = try? NSRegularExpression(pattern: "clang-(\\d+\\.\\d+)").firstMatch(in: full, range: NSRange(full.startIndex..., in: full)) {
+            clangShortVersion = "Clang " + String(full[Range(match.range(at: 1), in: full)!])
+        } else {
+            clangShortVersion = "Apple Clang"
         }
 
         // macOS version
@@ -44,10 +49,15 @@ class BenchmarkEngine: ObservableObject {
         xcTask.arguments = ["-version"]
         let xcPipe = Pipe()
         xcTask.standardOutput = xcPipe
+        xcTask.standardError = xcPipe
+        var xcData = Data()
+        xcPipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; if d.isEmpty { return }; xcData.append(d)
+        }
         try? xcTask.run()
         xcTask.waitUntilExit()
-        if let xcData = try? xcPipe.fileHandleForReading.readToEnd(),
-           let xcStr = String(data: xcData, encoding: .utf8) {
+        xcPipe.fileHandleForReading.readabilityHandler = nil
+        if let xcStr = String(data: xcData, encoding: .utf8) {
             xcodeVersion = xcStr.components(separatedBy: "\n").first ?? ""
         }
 
@@ -70,10 +80,15 @@ class BenchmarkEngine: ObservableObject {
         gpuTask.arguments = ["-c", "IOAccelerator", "-r"]
         let gpuPipe = Pipe()
         gpuTask.standardOutput = gpuPipe
+        gpuTask.standardError = gpuPipe
+        var gpuData = Data()
+        gpuPipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; if d.isEmpty { return }; gpuData.append(d)
+        }
         try? gpuTask.run()
         gpuTask.waitUntilExit()
-        if let gpuData = try? gpuPipe.fileHandleForReading.readToEnd(),
-           let gpuStr = String(data: gpuData, encoding: .utf8) {
+        gpuPipe.fileHandleForReading.readabilityHandler = nil
+        if let gpuStr = String(data: gpuData, encoding: .utf8) {
             for line in gpuStr.components(separatedBy: "\n") {
                 if line.contains("\"gpu-core-count\"") {
                     let num = line.components(separatedBy: CharacterSet.decimalDigits.inverted).joined()
