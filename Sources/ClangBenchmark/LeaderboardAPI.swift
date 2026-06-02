@@ -33,9 +33,17 @@ class LeaderboardAPI: ObservableObject {
         return dir.appendingPathComponent("ClangBenchmark/leaderboard_cache.json")
     }()
 
+    private var bundledSeedURL: URL? {
+        Bundle.main.url(forResource: "leaderboard_seed", withExtension: "json", subdirectory: "Resources")
+    }
+
     // MARK: - Fetch
 
     func fetchLeaderboard() {
+        // Seed cache from bundled data on first launch
+        seedCacheIfNeeded()
+        // Show cached data immediately, then refresh from network
+        loadCache()
         isLoading = true
         // Cache-bust with timestamp to bypass GitHub CDN cache
         let url = URL(string: readURL + "?t=\(Int(Date().timeIntervalSince1970))")!
@@ -44,7 +52,8 @@ class LeaderboardAPI: ObservableObject {
                 self?.isLoading = false
                 guard let data, error == nil,
                       let decoded = try? JSONDecoder().decode([LeaderboardEntry].self, from: data) else {
-                    self?.loadCache(); return
+                    // Network failed — keep showing cached data, no change needed
+                    return
                 }
                 let ranked = decoded.enumerated().map { i, e in var e = e; e.rank = i + 1; return e }
                 self?.entries = ranked
@@ -141,6 +150,14 @@ class LeaderboardAPI: ObservableObject {
     }
 
     // MARK: - Cache
+
+    private func seedCacheIfNeeded() {
+        // If cache file doesn't exist, copy from bundled seed
+        guard let seedURL = bundledSeedURL,
+              !FileManager.default.fileExists(atPath: cacheURL.path) else { return }
+        try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.copyItem(at: seedURL, to: cacheURL)
+    }
 
     private func saveCache(_ data: Data) {
         try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)

@@ -10,7 +10,8 @@ let package = Package(
             path: "Sources/ClangBenchmark",
             resources: [
                 .copy("TestSources"),
-                .copy("l10n")
+                .copy("l10n"),
+                .copy("Resources")
             ]
         )
     ]
