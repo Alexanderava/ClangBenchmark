@@ -9,7 +9,7 @@ struct LeaderboardEntry: Identifiable, Codable {
     let clangVersion: String; let timestamp: String; var rank: Int = 0
 }
 
-// MARK: - GitHub-backed Leaderboard
+// MARK: - GitHub-backed Leaderboard (SSH write, HTTP/CDN read)
 
 class LeaderboardAPI: ObservableObject {
     @Published var entries: [LeaderboardEntry] = []
@@ -18,86 +18,111 @@ class LeaderboardAPI: ObservableObject {
 
     static let shared = LeaderboardAPI()
 
-    // Embedded token — write-only access to clangbench-api repo
-    private let defaultToken = ""
-
+    private let repoURL = "git@github.com:Alexanderava/clangbench-api.git"
     private let readURL  = "https://raw.githubusercontent.com/Alexanderava/clangbench-api/main/leaderboard_data.json"
-    private let writeURL = "https://api.github.com/repos/Alexanderava/clangbench-api/contents/leaderboard_data.json"
-
-    private var token: String {
-        UserDefaults.standard.string(forKey: "github_pat") ?? defaultToken
-    }
 
     private let cacheURL: URL = {
         let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         return dir.appendingPathComponent("ClangBenchmark/leaderboard_cache.json")
     }()
 
+    private let gitDir: URL = {
+        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        return dir.appendingPathComponent("ClangBenchmark/clangbench-api")
+    }()
+
     private var bundledSeedURL: URL? {
-        // In packaged .app, resources are under Resources/
         if let url = Bundle.main.url(forResource: "leaderboard_seed", withExtension: "json", subdirectory: "Resources") {
             return url
         }
-        // In SPM dev builds, resources are at module root
         return Bundle.module.url(forResource: "leaderboard_seed", withExtension: "json")
     }
 
-    // MARK: - Fetch
+    // MARK: - Fetch (HTTP CDN + SSH git fallback)
 
     func fetchLeaderboard() {
-        // Seed cache from bundled data on first launch
         seedCacheIfNeeded()
-        // Show cached data immediately, then refresh from network
         loadCache()
         isLoading = true
-        // Cache-bust with timestamp to bypass GitHub CDN cache
+
+        // Try HTTP CDN first (fast, no auth)
         let url = URL(string: readURL + "?t=\(Int(Date().timeIntervalSince1970))")!
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, error in
-            DispatchQueue.main.async {
-                self?.isLoading = false
-                guard let data, error == nil,
-                      let decoded = try? JSONDecoder().decode([LeaderboardEntry].self, from: data) else {
-                    // Network failed — keep showing cached data, no change needed
-                    return
+        var req = URLRequest(url: url, timeoutInterval: 8)
+        req.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
+            if let data, error == nil,
+               let decoded = try? JSONDecoder().decode([LeaderboardEntry].self, from: data) {
+                DispatchQueue.main.async {
+                    self?.isLoading = false
+                    let ranked = decoded.enumerated().map { i, e in var e = e; e.rank = i + 1; return e }
+                    self?.entries = ranked
+                    self?.saveCache(data)
                 }
-                let ranked = decoded.enumerated().map { i, e in var e = e; e.rank = i + 1; return e }
-                self?.entries = ranked
-                self?.saveCache(data)
+                return
             }
+            // HTTP failed → try git clone via SSH
+            self?.fetchViaGit()
         }.resume()
     }
 
-    // MARK: - Submit
+    private func fetchViaGit() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let (ok, _) = self?.runGit("clone", "--depth", "1", self?.repoURL ?? "", self?.gitDir.path ?? "") ?? (false, "")
+            if !ok {
+                // Already cloned? Try pull
+                _ = self?.runGit("-C", self?.gitDir.path ?? "", "pull", "--depth", "1")
+            }
+            // Read JSON from cloned repo
+            let jsonPath = self?.gitDir.appendingPathComponent("leaderboard_data.json")
+            if let path = jsonPath,
+               let data = try? Data(contentsOf: path),
+               let decoded = try? JSONDecoder().decode([LeaderboardEntry].self, from: data) {
+                DispatchQueue.main.async {
+                    self?.isLoading = false
+                    let ranked = decoded.enumerated().map { i, e in var e = e; e.rank = i + 1; return e }
+                    self?.entries = ranked
+                    self?.saveCache(data)
+                }
+            } else {
+                DispatchQueue.main.async { self?.isLoading = false }
+            }
+        }
+    }
+
+    // MARK: - Submit (via git push over SSH)
 
     func submitResult(name: String, cpu: String, cpuCores: Int, gpuCores: Int,
                       score: Double, klinesPerSec: Double, osVersion: String,
                       clangVersion: String) {
-        guard !token.isEmpty else {
-            submitStatus = "请先设置 GitHub Token"
-            return
-        }
-
         submitStatus = L10n.v("leaderboard_submitting")
 
-        // 1. Read current file (get SHA)
-        var req = URLRequest(url: URL(string: writeURL)!)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        req.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
 
-        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
-            guard let self, let data,
-                  let fileInfo = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let sha = fileInfo["sha"] as? String,
-                  let contentB64 = fileInfo["content"] as? String,
-                  let content = Data(base64Encoded: contentB64.replacingOccurrences(of: "\n", with: "")),
-                  var list = try? JSONDecoder().decode([LeaderboardEntry].self, from: content)
-            else {
-                DispatchQueue.main.async { self?.submitStatus = L10n.v("leaderboard_failed") }
+            // 1. Clone or pull latest
+            let cloned: Bool
+            if FileManager.default.fileExists(atPath: self.gitDir.appendingPathComponent(".git").path) {
+                let (ok, _) = self.runGit("-C", self.gitDir.path, "pull", "--depth", "1")
+                cloned = ok
+            } else {
+                let (ok, _) = self.runGit("clone", "--depth", "1", self.repoURL, self.gitDir.path)
+                cloned = ok
+            }
+
+            guard cloned else {
+                DispatchQueue.main.async { self.submitStatus = "上传失败: 网络不通" }
                 return
             }
 
-            // 2. Append + sort + trim
+            // 2. Read + update JSON
+            let jsonPath = self.gitDir.appendingPathComponent("leaderboard_data.json")
+            guard let data = try? Data(contentsOf: jsonPath),
+                  var list = try? JSONDecoder().decode([LeaderboardEntry].self, from: data) else {
+                DispatchQueue.main.async { self.submitStatus = L10n.v("leaderboard_failed") }
+                return
+            }
+
             let entry = LeaderboardEntry(
                 name: name, cpu: cpu, cpuCores: cpuCores, gpuCores: gpuCores,
                 score: score, klinesPerSec: klinesPerSec, osVersion: osVersion,
@@ -111,33 +136,24 @@ class LeaderboardAPI: ObservableObject {
                 DispatchQueue.main.async { self.submitStatus = L10n.v("leaderboard_failed") }
                 return
             }
-            let b64 = newData.base64EncodedString()
+            try? newData.write(to: jsonPath)
 
-            // 3. PUT updated file
-            var putReq = URLRequest(url: URL(string: self.writeURL)!)
-            putReq.httpMethod = "PUT"
-            putReq.setValue("Bearer \(self.token)", forHTTPHeaderField: "Authorization")
-            putReq.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            putReq.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
+            // 3. Commit + push
+            let msg = "Add benchmark: \(cpu) - \(String(format: "%.0f", score)) pts"
+            let (ok1, _) = self.runGit("-C", self.gitDir.path, "add", "leaderboard_data.json")
+            let (ok2, _) = self.runGit("-C", self.gitDir.path, "commit", "-m", msg)
+            // Commit may fail if no changes (duplicate score) — that's OK
+            let (ok3, out3) = self.runGit("-C", self.gitDir.path, "push", "origin", "main")
 
-            let body: [String: Any] = [
-                "message": "Add benchmark: \(cpu) - \(String(format: "%.0f", score)) pts",
-                "content": b64,
-                "sha": sha
-            ]
-            putReq.httpBody = try? JSONSerialization.data(withJSONObject: body)
-
-            URLSession.shared.dataTask(with: putReq) { [weak self] _, resp, error in
-                DispatchQueue.main.async {
-                    if let r = resp as? HTTPURLResponse, r.statusCode == 200 || r.statusCode == 201 {
-                        self?.submitStatus = L10n.v("leaderboard_submitted")
-                        self?.fetchLeaderboard()
-                    } else {
-                        self?.submitStatus = L10n.v("leaderboard_failed")
-                    }
+            DispatchQueue.main.async {
+                if ok3 || ok1 {
+                    self.submitStatus = L10n.v("leaderboard_submitted")
+                    self.fetchLeaderboard()
+                } else {
+                    self.submitStatus = "上传失败: \(out3.prefix(60))"
                 }
-            }.resume()
-        }.resume()
+            }
+        }
     }
 
     // MARK: - Convenience
@@ -154,10 +170,37 @@ class LeaderboardAPI: ObservableObject {
         )
     }
 
+    // MARK: - Git helper (SSH)
+
+    @discardableResult
+    private func runGit(_ args: String...) -> (Bool, String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = args
+        // Force SSH and suppress prompts
+        p.environment = ["GIT_SSH_COMMAND": "ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10",
+                         "GIT_TERMINAL_PROMPT": "0"]
+        let outPipe = Pipe(); let errPipe = Pipe()
+        p.standardOutput = outPipe; p.standardError = errPipe
+        var output = Data()
+        outPipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; if d.isEmpty { return }; output.append(d)
+        }
+        errPipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; if d.isEmpty { return }; output.append(d)
+        }
+        try? p.run()
+        p.waitUntilExit()
+        outPipe.fileHandleForReading.readabilityHandler = nil
+        errPipe.fileHandleForReading.readabilityHandler = nil
+        let ok = p.terminationStatus == 0
+        let text = String(data: output, encoding: .utf8) ?? ""
+        return (ok, text)
+    }
+
     // MARK: - Cache
 
     private func seedCacheIfNeeded() {
-        // If cache file doesn't exist, copy from bundled seed
         guard let seedURL = bundledSeedURL,
               !FileManager.default.fileExists(atPath: cacheURL.path) else { return }
         try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
