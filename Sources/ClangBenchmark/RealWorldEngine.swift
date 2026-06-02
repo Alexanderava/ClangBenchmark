@@ -259,32 +259,52 @@ class RealWorldEngine: ObservableObject {
     private func run(_ args: String..., currentDir: String? = nil, timeout: TimeInterval = 300) -> String {
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/env"); p.arguments = args
         if let d = currentDir { p.currentDirectoryURL = URL(fileURLWithPath: d) }
-        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+        let outPipe = Pipe(); let errPipe = Pipe()
+        p.standardOutput = outPipe; p.standardError = errPipe
+        // Read pipes async to prevent buffer deadlock
+        var output = Data()
+        let queue = DispatchQueue(label: "pipe-read")
+        outPipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; if d.isEmpty { return }; queue.sync { output.append(d) }
+        }
+        errPipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; if d.isEmpty { return }; queue.sync { output.append(d) }
+        }
         try? p.run()
         let deadline = DispatchTime.now() + timeout
-        let semaphore = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async { p.waitUntilExit(); semaphore.signal() }
-        if semaphore.wait(timeout: deadline) == .timedOut {
-            p.terminate()
-            DispatchQueue.main.async { [weak self] in self?.logLines.append("⚠️ 超时: \(args.joined(separator: " "))") }
-        }
-        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let sem = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async { p.waitUntilExit(); sem.signal() }
+        let timedOut = sem.wait(timeout: deadline) == .timedOut
+        if timedOut { p.terminate(); DispatchQueue.main.async { [weak self] in self?.logLines.append("⚠️ 超时: \(args.prefix(3).joined(separator: " "))") } }
+        // After process exits, wait a moment for final pipe data
+        usleep(100_000); outPipe.fileHandleForReading.readabilityHandler = nil
+        errPipe.fileHandleForReading.readabilityHandler = nil
+        return String(data: output, encoding: .utf8) ?? ""
     }
 
     private func runEnv(_ env: [String:String], _ args: String..., currentDir: String?, timeout: TimeInterval = 300) -> String {
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/env"); p.arguments = args
         p.environment = { var e = ProcessInfo.processInfo.environment; for (k,v) in env { e[k]=v }; return e }()
         if let d = currentDir { p.currentDirectoryURL = URL(fileURLWithPath: d) }
-        let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
+        let outPipe = Pipe(); let errPipe = Pipe()
+        p.standardOutput = outPipe; p.standardError = errPipe
+        var output = Data()
+        let queue = DispatchQueue(label: "pipe-read")
+        outPipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; if d.isEmpty { return }; queue.sync { output.append(d) }
+        }
+        errPipe.fileHandleForReading.readabilityHandler = { h in
+            let d = h.availableData; if d.isEmpty { return }; queue.sync { output.append(d) }
+        }
         try? p.run()
         let deadline = DispatchTime.now() + timeout
-        let semaphore = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async { p.waitUntilExit(); semaphore.signal() }
-        if semaphore.wait(timeout: deadline) == .timedOut {
-            p.terminate()
-            DispatchQueue.main.async { [weak self] in self?.logLines.append("⚠️ 超时: make") }
-        }
-        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        let sem = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async { p.waitUntilExit(); sem.signal() }
+        let timedOut = sem.wait(timeout: deadline) == .timedOut
+                if timedOut { p.terminate(); DispatchQueue.main.async { [weak self] in self?.logLines.append("⚠️ 超时: make") } }
+        usleep(100_000); outPipe.fileHandleForReading.readabilityHandler = nil
+        errPipe.fileHandleForReading.readabilityHandler = nil
+        return String(data: output, encoding: .utf8) ?? ""
     }
 
     private func timeBlock(_ block: () -> Void) -> Double {
