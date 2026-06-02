@@ -23,7 +23,10 @@ struct MacroBenchmarkView: View {
 
                     Spacer()
 
-                    Button(action: onCancel) {
+                    Button(action: {
+                        macroEngine.cancelBuild()
+                        onCancel()
+                    }) {
                         HStack(spacing: 5) {
                             Image(systemName: "xmark").font(.system(size: 11, weight: .bold))
                             Text(L10n.v("cancel")).font(.system(size: 13, weight: .medium))

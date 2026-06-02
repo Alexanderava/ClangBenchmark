@@ -21,6 +21,7 @@ class RealWorldEngine: ObservableObject {
     @Published var roundScores: [Double] = []      // Klines/sec per measured round
     @Published var bestKlinesPerSec: Double = 0
     @Published var currentRound = 0; @Published var totalMeasuredRounds = 3
+    private var isCancelled = false
 
     private let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         .appendingPathComponent("ClangBenchmark/sources")
@@ -36,10 +37,17 @@ class RealWorldEngine: ObservableObject {
         guard !isRunning else { return }
         isRunning = true; bestMusl = nil; bestLua = nil
         roundScores = []; bestKlinesPerSec = 0; logLines = []; progress = 0
-        downloadDone = false; currentRound = 0
+        downloadDone = false; currentRound = 0; isCancelled = false
 
         log("🚀 Clang 编译基准 · 1 预热 + \(totalMeasuredRounds) 轮实测")
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in self?.runAllRounds() }
+    }
+
+    func cancelBuild() {
+        isCancelled = true
+        isRunning = false
+        phase = "已取消"
+        log("⏹ 用户取消")
     }
 
     private func runAllRounds() {
@@ -52,6 +60,7 @@ class RealWorldEngine: ObservableObject {
         if let m = wMusl, let l = wLua { muslLineCount = m.lineCount; luaLineCount = l.lineCount }
         try? FileManager.default.removeItem(at: warmDir)
         downloadDone = true
+        guard !isCancelled else { finishCancelled(); return }
         log("   ✅ 预热完成")
 
         // ── Measured rounds ──
@@ -59,6 +68,7 @@ class RealWorldEngine: ObservableObject {
         roundScores = []
 
         for r in 1...totalMeasuredRounds {
+            guard !isCancelled else { break }
             currentRound = r
             updatePhase("第 \(r)/\(totalMeasuredRounds) 轮", Double(r)/Double(totalMeasuredRounds+1) * 0.9 + 0.1)
             log("\n📊 第 \(r)/\(totalMeasuredRounds) 轮")
@@ -87,11 +97,17 @@ class RealWorldEngine: ObservableObject {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            if self.isCancelled { self.finishCancelled(); return }
             self.bestMusl = bestMuslR; self.bestLua = bestLuaR
             self.bestKlinesPerSec = bestKL
             self.phase = "完成"; self.progress = 1.0; self.isRunning = false
             self.log("\n✅ 基准测试完成 · 最优: \(String(format: "%.1f", bestKL)) Klines/s")
         }
+    }
+
+    private func finishCancelled() {
+        isRunning = false; phase = "已取消"
+        if bestKlinesPerSec == 0 { progress = 0 }
     }
 
     private func buildAll(workDir: URL, logDetails: Bool) -> (RealWorldResult?, RealWorldResult?) {
@@ -215,7 +231,7 @@ class RealWorldEngine: ObservableObject {
         let cached = cacheDir.appendingPathComponent(filename)
         if FileManager.default.fileExists(atPath: cached.path) { return (0, cached) }
         let start = CFAbsoluteTimeGetCurrent()
-        run("curl", "-sL", "-o", cached.path, url)
+        run("curl", "-sL", "--connect-timeout", "15", "--max-time", "120", "-o", cached.path, url, timeout: 130)
         return ((CFAbsoluteTimeGetCurrent()-start)*1000, cached)
     }
 
@@ -234,20 +250,34 @@ class RealWorldEngine: ObservableObject {
         }; return t
     }
 
-    private func run(_ args: String..., currentDir: String? = nil) -> String {
+    private func run(_ args: String..., currentDir: String? = nil, timeout: TimeInterval = 300) -> String {
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/env"); p.arguments = args
         if let d = currentDir { p.currentDirectoryURL = URL(fileURLWithPath: d) }
         let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
-        try? p.run(); p.waitUntilExit()
+        try? p.run()
+        let deadline = DispatchTime.now() + timeout
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async { p.waitUntilExit(); semaphore.signal() }
+        if semaphore.wait(timeout: deadline) == .timedOut {
+            p.terminate()
+            DispatchQueue.main.async { [weak self] in self?.logLines.append("⚠️ 超时: \(args.joined(separator: " "))") }
+        }
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     }
 
-    private func runEnv(_ env: [String:String], _ args: String..., currentDir: String?) -> String {
+    private func runEnv(_ env: [String:String], _ args: String..., currentDir: String?, timeout: TimeInterval = 300) -> String {
         let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/env"); p.arguments = args
         p.environment = { var e = ProcessInfo.processInfo.environment; for (k,v) in env { e[k]=v }; return e }()
         if let d = currentDir { p.currentDirectoryURL = URL(fileURLWithPath: d) }
         let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
-        try? p.run(); p.waitUntilExit()
+        try? p.run()
+        let deadline = DispatchTime.now() + timeout
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.global().async { p.waitUntilExit(); semaphore.signal() }
+        if semaphore.wait(timeout: deadline) == .timedOut {
+            p.terminate()
+            DispatchQueue.main.async { [weak self] in self?.logLines.append("⚠️ 超时: make") }
+        }
         return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     }
 
