@@ -114,6 +114,7 @@ class RealWorldEngine: ObservableObject {
 
         // Download (only first time)
         if !downloadDone {
+            updatePhase("下载 musl…", progress)
             if logDetails { log("📥 下载 musl...") }
             let (ms, _) = downloadIfNeeded(url: muslURL, filename: "musl-1.2.5.tar.gz")
             steps.append(BuildStepResult(phase: .download, durationMs: ms, outputLines: 0))
@@ -123,6 +124,7 @@ class RealWorldEngine: ObservableObject {
         }
 
         // Always extract from cache to fresh workDir
+        updatePhase("解压 musl…", progress)
         let (_, tarball) = downloadIfNeeded(url: muslURL, filename: "musl-1.2.5.tar.gz")
         if logDetails { log("📦 解压...") }
         let exMs = timeBlock { run("tar", "xzf", tarball.path, "-C", workDir.path) }
@@ -130,6 +132,7 @@ class RealWorldEngine: ObservableObject {
         if logDetails { log(String(format: "   ✅ %.0f ms", exMs)) }
 
         // Configure
+        updatePhase("配置 musl…", progress)
         if logDetails { log("⚙️  configure...") }
         let cfgMs = timeBlock { run("sh", "./configure", "--prefix=\(installDir.path)", "--disable-shared", currentDir: muslSrc.path) }
         steps.append(BuildStepResult(phase: .configure, durationMs: cfgMs, outputLines: 0))
@@ -140,6 +143,7 @@ class RealWorldEngine: ObservableObject {
 
         // Build
         let cpu = ProcessInfo.processInfo.activeProcessorCount
+        updatePhase("编译 musl (make -j\(cpu))…", progress)
         if logDetails { log("🔨 make -j\(cpu)...") }
         let cmpMs = compileFailed ? 0 : timeBlock { run("make", "-j\(cpu)", currentDir: muslSrc.path) }
         steps.append(BuildStepResult(phase: .compile, durationMs: cmpMs, outputLines: 0))
@@ -164,6 +168,7 @@ class RealWorldEngine: ObservableObject {
 
         // Download (only first time)
         if !downloadDone {
+            updatePhase("下载 Lua…", progress)
             if logDetails { log("📥 下载 Lua...") }
             let (ms, _) = downloadIfNeeded(url: luaURL, filename: "lua-5.4.7.tar.gz")
             steps.append(BuildStepResult(phase: .download, durationMs: ms, outputLines: 0))
@@ -173,12 +178,14 @@ class RealWorldEngine: ObservableObject {
         }
 
         // Always extract from cache to fresh workDir
+        updatePhase("解压 Lua…", progress)
         let (_, tarball) = downloadIfNeeded(url: luaURL, filename: "lua-5.4.7.tar.gz")
         let exMs = timeBlock { run("tar", "xzf", tarball.path, "-C", workDir.path) }
         steps.append(BuildStepResult(phase: .extract, durationMs: exMs, outputLines: 0))
         if logDetails { log(String(format: "   ✅ %.0f ms", exMs)) }
 
         let cpu = ProcessInfo.processInfo.activeProcessorCount
+        updatePhase("编译 Lua (make -j\(cpu))…", progress)
         let inc = "\(muslInstallDir.path)/include"; let lib = "\(muslInstallDir.path)/lib"
         if logDetails { log("🔨 make linux (CC=clang + musl)...") }
         let cmpMs = timeBlock {
