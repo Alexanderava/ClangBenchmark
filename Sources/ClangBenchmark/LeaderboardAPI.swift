@@ -18,12 +18,14 @@ class LeaderboardAPI: ObservableObject {
 
     static let shared = LeaderboardAPI()
 
-    private let repo = "Alexanderava/clangbench-api"
+    // Embedded token — write-only access to clangbench-api repo
+    private let defaultToken = "REMOVED_TOKEN"
+
     private let readURL  = "https://raw.githubusercontent.com/Alexanderava/clangbench-api/main/leaderboard_data.json"
     private let writeURL = "https://api.github.com/repos/Alexanderava/clangbench-api/contents/leaderboard_data.json"
 
     private var token: String {
-        UserDefaults.standard.string(forKey: "github_pat") ?? ""
+        UserDefaults.standard.string(forKey: "github_pat") ?? defaultToken
     }
 
     private let cacheURL: URL = {
