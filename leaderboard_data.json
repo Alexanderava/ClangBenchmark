@@ -1,0 +1,13 @@
+[
+  {
+    "name": "M2 Max",
+    "cpu": "Apple M2 Max",
+    "cpuCores": 12,
+    "gpuCores": 38,
+    "score": 5137,
+    "klinesPerSec": 25.3,
+    "osVersion": "macOS 26.0",
+    "clangVersion": "Clang 21.0",
+    "timestamp": "2026-06-02 05:40:08 UTC"
+  }
+]
