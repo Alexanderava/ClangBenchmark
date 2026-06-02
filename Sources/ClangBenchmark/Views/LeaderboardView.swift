@@ -131,16 +131,17 @@ struct LeaderboardView: View {
 
     var leaderboardList: some View {
         VStack(spacing: 10) {
-            // Header row
+            // Header
             HStack(spacing: 0) {
-                Text(L10n.v("leaderboard_rank")).frame(width: 40, alignment: .leading)
-                Text(L10n.v("leaderboard_cpu")).frame(maxWidth: .infinity, alignment: .leading)
-                Text(L10n.v("leaderboard_score")).frame(width: 70, alignment: .trailing)
-                Text(L10n.v("leaderboard_speed")).frame(width: 80, alignment: .trailing)
+                Text(L10n.v("leaderboard_rank")).frame(width: 44, alignment: .leading)
+                Text("CPU").frame(maxWidth: .infinity, alignment: .leading)
+                Text("CORES").frame(width: 50, alignment: .center)
+                Text("SCORE").frame(width: 60, alignment: .trailing)
+                Text("SPEED").frame(width: 70, alignment: .trailing)
             }
-            .font(.system(size: 11, weight: .bold))
-            .foregroundColor(.black.opacity(0.3))
-            .padding(.horizontal, 16).padding(.vertical, 6)
+            .font(.system(size: 10, weight: .bold))
+            .foregroundColor(.black.opacity(0.25))
+            .padding(.horizontal, 14).padding(.vertical, 6)
 
             ForEach(api.entries) { entry in
                 LeaderboardRow(entry: entry)
@@ -168,40 +169,45 @@ struct LeaderboardRow: View {
             // Rank
             ZStack {
                 if entry.rank <= 3 {
-                    Circle().fill(rankColor).frame(width: 26, height: 26)
-                    Text("\(entry.rank)").font(.system(size: 12, weight: .bold)).foregroundColor(.white)
+                    Circle().fill(rankColor).frame(width: 24, height: 24)
+                    Text("\(entry.rank)").font(.system(size: 11, weight: .bold)).foregroundColor(.white)
                 } else {
-                    Text("\(entry.rank)").font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.black.opacity(0.35))
+                    Text("\(entry.rank)").font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.black.opacity(0.3))
                 }
             }
-            .frame(width: 40, alignment: .leading)
+            .frame(width: 44, alignment: .leading)
 
-            // CPU info
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.cpu).font(.system(size: 14, weight: .semibold)).foregroundColor(.black.opacity(0.7))
-                Text("\(entry.cpuCores)+\(entry.gpuCores) cores · \(entry.osVersion)")
-                    .font(.system(size: 10)).foregroundColor(.black.opacity(0.3))
+            // CPU
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.cpu).font(.system(size: 13, weight: .semibold)).foregroundColor(.black.opacity(0.7)).lineLimit(1)
+                Text(entry.osVersion).font(.system(size: 9)).foregroundColor(.black.opacity(0.25))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // Score
-            Text(String(format: "%.0f", entry.score))
-                .font(.system(size: 15, weight: .bold, design: .rounded))
-                .foregroundColor(.black.opacity(0.65))
-                .frame(width: 70, alignment: .trailing)
+            // CORES
+            Text("\(entry.cpuCores)+\(entry.gpuCores)")
+                .font(.system(size: 12, weight: .medium, design: .rounded))
+                .foregroundColor(.purple.opacity(0.7))
+                .frame(width: 50, alignment: .center)
 
-            // Klines/s
+            // SCORE
+            Text(String(format: "%.0f", entry.score))
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundColor(.black.opacity(0.7))
+                .frame(width: 60, alignment: .trailing)
+
+            // SPEED
             Text(String(format: "%.1f", entry.klinesPerSec))
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundColor(.black.opacity(0.45))
-                .frame(width: 80, alignment: .trailing)
+                .font(.system(size: 11, weight: .medium, design: .monospaced))
+                .foregroundColor(.black.opacity(0.4))
+                .frame(width: 70, alignment: .trailing)
         }
-        .padding(.horizontal, 16).padding(.vertical, 12)
-        .background(RoundedRectangle(cornerRadius: 12)
-            .fill(.white.opacity(entry.rank <= 3 ? 0.25 : 0.1))
-            .background(.ultraThinMaterial).clipShape(RoundedRectangle(cornerRadius: 12)))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.3), lineWidth: 0.6))
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .background(RoundedRectangle(cornerRadius: 10)
+            .fill(.white.opacity(entry.rank <= 3 ? 0.22 : 0.08))
+            .background(.ultraThinMaterial.opacity(0.5)).clipShape(RoundedRectangle(cornerRadius: 10)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.25), lineWidth: 0.6))
     }
 
     var rankColor: Color {
